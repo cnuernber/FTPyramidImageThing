@@ -63,6 +63,13 @@
     <None Include="packages.config" />
     <EmbeddedResource Include="gui.glade" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GLWidget\GLWidget.csproj">
+      <Name>GLWidget</Name>
+      <Project>{ffceeea2-e16a-46c4-8ff3-debd1a9950f9}</Project>
+      <Private>True</Private>
+    </ProjectReference>
+  </ItemGroup>
   <PropertyGroup>
     <MinimumVisualStudioVersion Condition="'$(MinimumVisualStudioVersion)' == ''">11</MinimumVisualStudioVersion>
   </PropertyGroup>
