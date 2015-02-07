@@ -4,21 +4,25 @@ open Gtk
 open System
 open Glade
 
-type private GladeObj =
-    [<Widget>] val mutable button1 : Button
-    [<Widget>] val mutable label1 : Label
-    new() = { button1 = null; label1 = null; }
+type private GladeObj () =
+    [<Widget>] [<DefaultValue>] val mutable mainwindow : Window
+    [<Widget>] [<DefaultValue>] val mutable rotation : Entry
+    [<Widget>] [<DefaultValue>] val mutable scale : Entry
+    [<Widget>] [<DefaultValue>] val mutable translation : Entry
+    [<Widget>] [<DefaultValue>] val mutable source : Entry
+    [<Widget>] [<DefaultValue>] val mutable destination : Entry
+    [<Widget>] [<DefaultValue>] val mutable renderview : Viewport
+    [<Widget>] [<DefaultValue>] val mutable resultview : Viewport
+
+    
 
 
 [<EntryPoint>]
 let main argv = 
     Application.Init()
-    let gxml = new Glade.XML( null, "gui.glade", "window1", null )
+    let gxml = new Glade.XML( null, "gui.glade", "mainwindow", null )
     let gobj = new GladeObj()
     gxml.Autoconnect( gobj )
-    gobj.button1.Clicked.Add( fun evArgs -> 
-                                Console.WriteLine( "Shit got pressed") 
-                                gobj.label1.Text <- "Mutable FSharp")
 
 
     Application.Run()
