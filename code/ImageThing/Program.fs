@@ -112,7 +112,6 @@ type public ModelData() =
         this.destination <- ui.destination.Text
         this.destsize <- ModelData.parseInt( ui.destsize.Text, this.destsize )
 
-
 [<EntryPoint>]
 let main argv = 
     Application.Init()
@@ -132,13 +131,15 @@ let main argv =
         GL.ClearColor( 1.0f, 0.0f, 0.0f, 1.0f )
         GL.Clear( ClearBufferMask.ColorBufferBit )
 
-
+    
     let toolkit = Toolkit.Init()
     renderer.RenderFrame.Add( renderFrame )
     gobj.renderview.ShowAll();
     gobj.resultview.Add( results )
     gobj.resultview.ShowAll();
     settings.toUI(gobj)
+    
+
     gobj.mainwindow.Destroyed.Add( fun evArgs -> settings.fromUI(gobj); settings.save(); Application.Quit() )
     Application.Run()
     0 // return an integer exit code
