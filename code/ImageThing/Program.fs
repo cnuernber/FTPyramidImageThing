@@ -8,6 +8,7 @@ open System.Xml.Serialization
 open Glade
 open OpenTK
 open OpenTK.Graphics.OpenGL
+open System.Runtime.InteropServices
 
 type public GladeObj () =
     [<Widget>] [<DefaultValue>] val mutable mainwindow : Window
@@ -112,6 +113,120 @@ type public ModelData() =
         this.destination <- ui.destination.Text
         this.destsize <- ModelData.parseInt( ui.destsize.Text, this.destsize )
 
+let findFile( canRead, uiParent, existing:string ) =
+    let (action,accept) = if canRead then (FileChooserAction.Open,"Open")
+                            else (FileChooserAction.Save,"Save")
+
+    let fc = new FileChooserDialog("Choose the file to open",
+                                    uiParent,
+                                    action,
+                                    "Cancel",ResponseType.Cancel,
+                                    accept,ResponseType.Accept)
+    if not canRead then
+        fc.DoOverwriteConfirmation <- true
+
+    if existing.Length > 0 then
+        ignore( fc.SetFilename( existing ) )
+
+    if ( fc.Run() = int32(ResponseType.Accept) ) then
+        Some(fc.Filename)
+    else
+        None
+
+let bindModelToUI( ui:GladeObj, model:ModelData, render:GLWidget ) = 
+    let genericHandler evArgs =
+        model.fromUI(ui)
+        render.QueueDraw()
+    ui.rotation.Changed.Add( genericHandler )
+    ui.scale.Changed.Add( genericHandler )
+    ui.translation.Changed.Add( genericHandler )
+    ui.destination.Changed.Add( genericHandler )
+    ui.source.Changed.Add( genericHandler )
+    ui.destsize.Changed.Add( genericHandler )
+    ui.destBrowse.Clicked.Add( fun fnArgs -> 
+                                    let opt = findFile( false, ui.mainwindow, model.destination)
+                                    if opt.IsSome then
+                                        model.destination <- opt.Value
+                                        model.toUI(ui)
+                                        render.QueueDraw() )
+    ui.srcBrowse.Clicked.Add( fun fnArgs -> 
+                                    let opt = findFile( true, ui.mainwindow, model.source)
+                                    if opt.IsSome then
+                                        model.source <- opt.Value
+                                        model.toUI(ui)
+                                        render.QueueDraw() )
+
+let bgimage_vert = 
+    "in vec2 vpos;\n\
+    out vec2 frag_vpos;\n\
+    void main()\n\
+    {\n\
+    \tgl_Position = vec4(vpos.xy, 0.0, 1.0 );\n\
+    \tfrag_vpos = vpos;\n\
+     }\n"
+
+let bgimage_frag =
+    "uniform sampler2D image;\n\
+    in vec2 frag_vpos;\n\
+    out vec4 fragData;\n\
+    void main()\n\
+    {\n\
+    \tfragData = vec4(abs(frag_vpos.x), abs(frag_vpos.y), 0.0, 1.0);\n\
+    }\n"
+
+let toNativef32 (data:float32[] ) =
+    let datalen = data.Length
+    let datasize = nativeint(datalen * 4);
+    let retval = Marshal.AllocHGlobal( datasize )
+    Marshal.Copy(data, 0, retval, data.Length )
+    (retval,datasize)
+    
+let toNativei32 (data:int32[] ) =
+    let datalen = data.Length
+    let datasize = nativeint(datalen * 4);
+    let retval = Marshal.AllocHGlobal( datasize )
+    Marshal.Copy(data, 0, retval, data.Length )
+    (retval,datasize)
+
+let createAndUploadDataf32( data, target, usage ) =
+    let retval = GL.GenBuffer()
+    let (buffer,nativesize) = toNativef32( data )
+    GL.BindBuffer( target, retval )
+    GL.BufferData( target, nativesize, buffer, usage)
+    retval
+    
+let createAndUploadDatai32( data, target, usage ) =
+    let retval = GL.GenBuffer()
+    let (buffer,nativesize) = toNativei32( data )
+    GL.BindBuffer( target, retval )
+    GL.BufferData( target, nativesize, buffer, usage)
+    retval
+
+
+type RenderContext(inModel:ModelData, inDest:Image) =
+    let model = inModel
+    let dest = inDest
+    let mutable sourcepath = ""
+    let mutable destpath = ""
+    let mutable bgimagevert = int32(0)
+    let mutable bgimageidx = int32(0)
+
+    member this.checkBuffers() = 
+        if bgimagevert = 0 then
+            bgimagevert <- createAndUploadDataf32([|-1.f;-1.f;
+                                      -1.f; 1.f; 
+                                       1.f; 1.f; 
+                                       1.f; -1.f |]
+                                       , BufferTarget.ArrayBuffer
+                                       , BufferUsageHint.StaticDraw )
+
+            bgimageidx <- createAndUploadDatai32( [|0;1;2;2;3;0|]
+                                       , BufferTarget.ArrayBuffer
+                                       , BufferUsageHint.StaticDraw )
+
+
+
+
 [<EntryPoint>]
 let main argv = 
     Application.Init()
@@ -122,6 +237,7 @@ let main argv =
     let results = new Image()
     gobj.renderview.Add( renderer )
     let settings = ModelData.load()
+    bindModelToUI( gobj, settings, renderer)
 
     let renderFrame evArgs = 
         let mutable width = 0
