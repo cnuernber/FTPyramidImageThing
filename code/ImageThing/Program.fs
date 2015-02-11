@@ -157,7 +157,8 @@ let bindModelToUI( ui:GladeObj, model:ModelData, render:GLWidget ) =
                                         render.QueueDraw() )
 
 let bgimage_vert = 
-    "in vec2 vpos;\n\
+    "#version 130\n\
+    in vec2 vpos;\n\
     out vec2 frag_vpos;\n\
     void main()\n\
     {\n\
@@ -166,7 +167,8 @@ let bgimage_vert =
      }\n"
 
 let bgimage_frag =
-    "uniform sampler2D image;\n\
+    "#version 130\n\
+    uniform sampler2D image;\n\
     in vec2 frag_vpos;\n\
     out vec4 fragData;\n\
     void main()\n\
@@ -174,6 +176,118 @@ let bgimage_frag =
     \tfragData = vec4(abs(frag_vpos.x), abs(frag_vpos.y), 0.0, 1.0);\n\
     }\n"
 
+(*Uniforms have a location*)
+type UniformData =
+    struct
+        val name : string
+        val index : int
+        val location : int
+        val dtype : ActiveUniformType;
+        new(_name,_index,_location, _dtype) 
+            = { name = _name; index = _index; location = _location; dtype = _dtype; }
+    end
+
+let lookupUniforms( progHandle:int ) = 
+    GL.UseProgram( progHandle )
+    let mutable uniformCount = 0
+    GL.GetProgram( progHandle, GetProgramParameterName.ActiveUniforms, &uniformCount )
+    let ( retval : UniformData array ) = Array.zeroCreate uniformCount
+
+    if uniformCount > 0 then
+        for idx in 0..(uniformCount-1) do
+            let mutable location = -1
+            let mutable dtype = ActiveUniformType.Bool
+            let name = GL.GetActiveUniform( progHandle, idx, &location, &dtype )
+            retval.[idx] <- UniformData( name, idx, location, dtype )
+    retval;
+
+(*Attributes are always accessed via index*)
+type AttribData =
+    struct
+        val name : string
+        val index : int
+        val size : int
+        val dtype : ActiveAttribType;
+        new(_name,_index, _size, _dtype) 
+            = { name = _name; index = _index; size = _size; dtype = _dtype; }
+    end
+
+let lookupAttributes( progHandle:int ) = 
+    GL.UseProgram( progHandle )
+    let mutable attributeCount = 0;
+    GL.GetProgram( progHandle, GetProgramParameterName.ActiveAttributes, &attributeCount )
+    let ( retval : AttribData array ) = Array.zeroCreate attributeCount
+    if attributeCount > 0 then
+        for idx in 0..(attributeCount-1) do
+            let mutable attribSize = -1;
+            let mutable dtype = ActiveAttribType.Double
+            let name = GL.GetActiveAttrib( progHandle, idx, &attribSize, &dtype )
+            retval.[idx] <- AttribData( name, idx, attribSize, dtype )
+    retval
+
+type Shader = 
+    val progHandle : int;
+    val uniforms : UniformData array
+    val attributes : AttribData array
+    new( hdl ) 
+        = { progHandle = hdl; uniforms = lookupUniforms(hdl); attributes = lookupAttributes(hdl ) }
+
+
+let compileShader( code, stype ) =
+    let hdl = GL.CreateShader( stype )
+    GL.ShaderSource( hdl, code )
+    GL.CompileShader(hdl)
+    let mutable result = 0
+    GL.GetShader(hdl, ShaderParameter.CompileStatus, &result)
+    let log = GL.GetShaderInfoLog( hdl )
+    if result = int(All.True) then
+        if ( log.Length > 0 ) then
+            Console.WriteLine( "Shader compilation output: ")
+            Console.WriteLine( log )
+        Some(hdl)
+    else
+        GL.DeleteShader( hdl )
+        Console.WriteLine( "Failed to compile shader: " )
+        Console.WriteLine( log )
+        Console.WriteLine( code )
+        None
+        
+type ShaderOpt = Shader option
+
+let compileShaderProgram( vcode, fcode ) : Shader option= 
+    let vhdl = compileShader( vcode, ShaderType.VertexShader )
+    if vhdl.IsNone then ShaderOpt.None
+    else
+
+        let fhdl = compileShader(fcode, ShaderType.FragmentShader)
+        if fhdl.IsNone then ShaderOpt.None
+        else
+            let phandle = GL.CreateProgram()
+            GL.AttachShader( phandle, vhdl.Value )
+            GL.AttachShader( phandle, fhdl.Value )
+            GL.LinkProgram( phandle )
+            (*Not needed after link*)
+            GL.DeleteShader( vhdl.Value )
+            GL.DeleteShader( fhdl.Value )
+            let log = GL.GetProgramInfoLog( phandle )
+            let mutable result = 0
+            GL.GetProgram( phandle, GetProgramParameterName.LinkStatus, &result )
+            
+            if result = int(All.True) then
+                if log.Length > 0 then
+                    Console.WriteLine( "Program link output: ")
+                    Console.WriteLine( log )
+
+                Some(new Shader( phandle ))
+            else
+                Console.WriteLine( "Failed to link program: " )
+                Console.WriteLine( log )
+                Console.WriteLine( vcode )
+                Console.WriteLine( fcode )
+                None
+
+
+                
 let toNativef32 (data:float32[] ) =
     let datalen = data.Length
     let datasize = nativeint(datalen * 4);
@@ -210,6 +324,7 @@ type RenderContext(inModel:ModelData, inDest:Image) =
     let mutable destpath = ""
     let mutable bgimagevert = int32(0)
     let mutable bgimageidx = int32(0)
+    let mutable bgshader : Shader option = None
 
     member this.checkBuffers() = 
         if bgimagevert = 0 then
@@ -224,7 +339,7 @@ type RenderContext(inModel:ModelData, inDest:Image) =
                                        , BufferTarget.ArrayBuffer
                                        , BufferUsageHint.StaticDraw )
 
-
+            bgshader <- compileShaderProgram( bgimage_vert, bgimage_frag )
 
 
 [<EntryPoint>]
@@ -233,11 +348,13 @@ let main argv =
     let gxml = new Glade.XML( null, "gui.glade", "mainwindow", null )
     let gobj = new GladeObj()
     gxml.Autoconnect( gobj )
-    let renderer = new GLWidget()
+    let renderer = new GLWidget(OpenTK.Graphics.GraphicsMode.Default, 3, 0, OpenTK.Graphics.GraphicsContextFlags.Debug )
     let results = new Image()
     gobj.renderview.Add( renderer )
     let settings = ModelData.load()
     bindModelToUI( gobj, settings, renderer)
+
+    let rc = RenderContext( settings, results )
 
     let renderFrame evArgs = 
         let mutable width = 0
@@ -246,6 +363,7 @@ let main argv =
         GL.Viewport( 0, 0, width, height)
         GL.ClearColor( 1.0f, 0.0f, 0.0f, 1.0f )
         GL.Clear( ClearBufferMask.ColorBufferBit )
+        rc.checkBuffers()
 
     
     let toolkit = Toolkit.Init()
