@@ -222,6 +222,7 @@ let lookupAttributes( progHandle:int ) =
             let mutable attribSize = -1;
             let mutable dtype = ActiveAttribType.Double
             let name = GL.GetActiveAttrib( progHandle, idx, &attribSize, &dtype )
+            let loc = GL.GetAttribLocation( progHandle, name )
             retval.[idx] <- AttribData( name, idx, attribSize, dtype )
     retval
 
@@ -307,6 +308,7 @@ let createAndUploadDataf32( data, target, usage ) =
     let (buffer,nativesize) = toNativef32( data )
     GL.BindBuffer( target, retval )
     GL.BufferData( target, nativesize, buffer, usage)
+    Marshal.Release( buffer ) |> ignore
     retval
     
 let createAndUploadDatai32( data, target, usage ) =
@@ -314,7 +316,10 @@ let createAndUploadDatai32( data, target, usage ) =
     let (buffer,nativesize) = toNativei32( data )
     GL.BindBuffer( target, retval )
     GL.BufferData( target, nativesize, buffer, usage)
+    Marshal.Release( buffer ) |> ignore
     retval
+
+ 
 
 
 type RenderContext(inModel:ModelData, inDest:Image) =
@@ -326,6 +331,11 @@ type RenderContext(inModel:ModelData, inDest:Image) =
     let mutable bgimageidx = int32(0)
     let mutable bgshader : Shader option = None
 
+    member this.checkGLError =
+        let error = GL.GetError()
+        let hasError = error = ErrorCode.NoError
+        System.Diagnostics.Debug.Assert( hasError )
+
     member this.checkBuffers() = 
         if bgimagevert = 0 then
             bgimagevert <- createAndUploadDataf32([|-1.f;-1.f;
@@ -334,12 +344,46 @@ type RenderContext(inModel:ModelData, inDest:Image) =
                                        1.f; -1.f |]
                                        , BufferTarget.ArrayBuffer
                                        , BufferUsageHint.StaticDraw )
-
             bgimageidx <- createAndUploadDatai32( [|0;1;2;2;3;0|]
                                        , BufferTarget.ArrayBuffer
                                        , BufferUsageHint.StaticDraw )
 
             bgshader <- compileShaderProgram( bgimage_vert, bgimage_frag )
+
+
+
+    member this.render(width, height) =
+        if (width > 0 && height > 0) then 
+            GL.Viewport( 0, 0, width, height)
+            GL.ClearColor( 1.0f, 1.0f, 1.0f, 1.0f )
+            GL.Clear( ClearBufferMask.ColorBufferBit )
+            this.checkGLError
+            this.checkBuffers()
+            GL.UseProgram( bgshader.Value.progHandle )
+            GL.BindBuffer( BufferTarget.ArrayBuffer, bgimagevert )
+            GL.EnableVertexAttribArray( 0 )
+            GL.VertexAttribPointer( 0, 2, VertexAttribPointerType.Float, true, 8, 0)
+        
+            this.checkGLError
+
+            GL.BindBuffer( BufferTarget.ElementArrayBuffer, bgimageidx )
+
+            GL.Disable( EnableCap.CullFace )
+        
+            GL.Disable( EnableCap.DepthTest )
+        
+            GL.Disable( EnableCap.StencilTest )
+        
+            GL.Disable( EnableCap.Blend )
+        
+            GL.DrawElements( BeginMode.Triangles, 6, DrawElementsType.UnsignedInt, 0 )
+        
+            GL.BindBuffer( BufferTarget.ArrayBuffer, 0 )
+        
+            GL.BindBuffer( BufferTarget.ElementArrayBuffer, 0 )
+        
+            GL.DisableVertexAttribArray( 0 )
+        
 
 
 [<EntryPoint>]
@@ -348,22 +392,18 @@ let main argv =
     let gxml = new Glade.XML( null, "gui.glade", "mainwindow", null )
     let gobj = new GladeObj()
     gxml.Autoconnect( gobj )
-    let renderer = new GLWidget(OpenTK.Graphics.GraphicsMode.Default, 3, 0, OpenTK.Graphics.GraphicsContextFlags.Debug )
+    let renderer = new GLWidget(OpenTK.Graphics.GraphicsMode.Default, 3, 0, OpenTK.Graphics.GraphicsContextFlags.Default )
     let results = new Image()
     gobj.renderview.Add( renderer )
     let settings = ModelData.load()
     bindModelToUI( gobj, settings, renderer)
 
     let rc = RenderContext( settings, results )
-
-    let renderFrame evArgs = 
-        let mutable width = 0
-        let mutable height = 0
-        gobj.renderview.GetSizeRequest(ref width, ref height)
-        GL.Viewport( 0, 0, width, height)
-        GL.ClearColor( 1.0f, 0.0f, 0.0f, 1.0f )
-        GL.Clear( ClearBufferMask.ColorBufferBit )
-        rc.checkBuffers()
+    let renderFrame evArgs =
+        let alloc = renderer.Allocation 
+        let width = alloc.Width
+        let height = alloc.Height
+        rc.render(width, height)
 
     
     let toolkit = Toolkit.Init()
