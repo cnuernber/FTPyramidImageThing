@@ -362,6 +362,16 @@ let createGlTexFromPath( path ) =
         let bytes : byte array = Array.zeroCreate length
         Marshal.Copy( bmdata.Scan0, bytes, 0, length)
         bm.UnlockBits( bmdata )
+        (*flip the rows so the image is right-side up*)
+        let row : byte array = Array.zeroCreate bmdata.Stride
+        for h in 0..(bm.Height/2) do
+            let endRow = bm.Height - h - 1
+            let startOffset = h*bmdata.Stride
+            let endOffset = endRow*bmdata.Stride
+            let rowlen = bmdata.Stride
+            Array.Copy(bytes, startOffset, row, 0, bmdata.Stride )
+            Array.Copy(bytes, endOffset, bytes, startOffset, bmdata.Stride )
+            Array.Copy(row, 0, bytes, endOffset, bmdata.Stride )
 
         let texhdl = GL.GenTexture()
         GL.ActiveTexture(TextureUnit.Texture0)
