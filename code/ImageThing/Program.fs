@@ -9,6 +9,7 @@ open Glade
 open OpenTK
 open OpenTK.Graphics.OpenGL
 open System.Runtime.InteropServices
+open System.IO
 
 type public GladeObj () =
     [<Widget>] [<DefaultValue>] val mutable mainwindow : Window
@@ -30,6 +31,8 @@ type public ModelData() =
     [<DefaultValue>] val mutable source : string
     [<DefaultValue>] val mutable destination : string
     [<DefaultValue>] val mutable destsize : int
+
+    let mutable ignoreUIEvents = false
 
     static member defaults() = 
       let retval = new ModelData()
@@ -69,7 +72,7 @@ type public ModelData() =
     member this.save() = 
         ModelData.ensureAppDir()
         try
-            let file = File.OpenWrite( settingsFileName )
+            let file = File.Open( settingsFileName, FileMode.Create, FileAccess.Write )
             try
                 let mytype = typeof<ModelData>
                 let serializer = XmlSerializer( mytype )
@@ -81,12 +84,14 @@ type public ModelData() =
     
         
     member this.toUI(ui:GladeObj) =
+        ignoreUIEvents <- true
         ui.rotation.Text <- this.rotation.ToString()
         ui.scale.Text <- this.scale.ToString()
         ui.translation.Text <- String.Concat(this.translation.X.ToString(), " ", this.translation.Y.ToString() )
         ui.source.Text <- this.source.ToString()
         ui.destination.Text <- this.destination.ToString()
         ui.destsize.Text <- this.destsize.ToString()
+        ignoreUIEvents <- false
 
     static member parseFloat( data, existing ) =
         let (ok, data)  = System.Double.TryParse( data )
@@ -106,12 +111,14 @@ type public ModelData() =
             | _ -> existing
 
     member this.fromUI( ui:GladeObj) =
-        this.rotation <- ModelData.parseFloat( ui.rotation.Text, this.rotation )
-        this.scale <- ModelData.parseFloat( ui.scale.Text, this.scale )
-        this.translation <- ModelData.parseVec2( ui.translation.Text, this.translation )
-        this.source <- ui.source.Text
-        this.destination <- ui.destination.Text
-        this.destsize <- ModelData.parseInt( ui.destsize.Text, this.destsize )
+        if not ignoreUIEvents then
+            this.rotation <- ModelData.parseFloat( ui.rotation.Text, this.rotation )
+            this.scale <- ModelData.parseFloat( ui.scale.Text, this.scale )
+            this.translation <- ModelData.parseVec2( ui.translation.Text, this.translation )
+            this.source <- ui.source.Text
+            this.destination <- ui.destination.Text
+            this.destsize <- ModelData.parseInt( ui.destsize.Text, this.destsize )
+
 
 let findFile( canRead, uiParent, existing:string ) =
     let (action,accept) = if canRead then (FileChooserAction.Open,"Open")
@@ -173,7 +180,9 @@ let bgimage_frag =
     out vec4 fragData;\n\
     void main()\n\
     {\n\
-    \tfragData = vec4(abs(frag_vpos.x), abs(frag_vpos.y), 0.0, 1.0);\n\
+    \tvec2 uvcoord = (frag_vpos + vec2(1.0, 1.0)) / 2.0;\n\
+    \tvec4 texdata = texture( image, uvcoord );\n\
+    \tfragData = texdata.xyzw;\n\
     }\n"
 
 (*Uniforms have a location*)
@@ -195,9 +204,10 @@ let lookupUniforms( progHandle:int ) =
 
     if uniformCount > 0 then
         for idx in 0..(uniformCount-1) do
-            let mutable location = -1
+            let mutable size = -1
             let mutable dtype = ActiveUniformType.Bool
-            let name = GL.GetActiveUniform( progHandle, idx, &location, &dtype )
+            let name = GL.GetActiveUniform( progHandle, idx, &size, &dtype )
+            let location = GL.GetUniformLocation( progHandle, name )
             retval.[idx] <- UniformData( name, idx, location, dtype )
     retval;
 
@@ -233,6 +243,17 @@ type Shader =
     new( hdl ) 
         = { progHandle = hdl; uniforms = lookupUniforms(hdl); attributes = lookupAttributes(hdl ) }
 
+    member this.getUniLoc( name ) =
+        let matches (uni : UniformData) = uni.name = name
+        let item = Array.tryFind matches this.uniforms
+
+        if item.IsSome then
+            Some( item.Value.location )
+        else
+            None
+
+
+        
 
 let compileShader( code, stype ) =
     let hdl = GL.CreateShader( stype )
@@ -319,7 +340,42 @@ let createAndUploadDatai32( data, target, usage ) =
     Marshal.Release( buffer ) |> ignore
     retval
 
+type PathTexture =
+    struct
+        val handle : int
+        val width : int
+        val height : int
+        val path : string
+        new( hdl, w, h, p ) = { handle = hdl; width = w; height = h; path = p; }
+    end
  
+let createGlTexFromPath( path ) = 
+    try
+        let stream = new FileStream( path, FileMode.Open )
+        let bm = new System.Drawing.Bitmap( stream )
+        let format = bm.PixelFormat
+        let bmdata = bm.LockBits( System.Drawing.Rectangle(0, 0, bm.Width, bm.Height)
+                                    , System.Drawing.Imaging.ImageLockMode.ReadOnly
+                                    , System.Drawing.Imaging.PixelFormat.Format32bppArgb)
+
+        let length = bmdata.Stride * bm.Height
+        let bytes : byte array = Array.zeroCreate length
+        Marshal.Copy( bmdata.Scan0, bytes, 0, length)
+        bm.UnlockBits( bmdata )
+
+        let texhdl = GL.GenTexture()
+        GL.ActiveTexture(TextureUnit.Texture0)
+        GL.BindTexture( TextureTarget.Texture2D, texhdl )
+        (*Uploads data to the texture specified for the active texture unit*)
+        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba
+                            , bm.Width, bm.Height, 0, PixelFormat.Bgra
+                            , PixelType.UnsignedByte, bytes)
+
+        Some( PathTexture( texhdl, bm.Width, bm.Height, path ) )
+    with
+        | _ -> None
+     
+    
 
 
 type RenderContext(inModel:ModelData, inDest:Image) =
@@ -330,11 +386,63 @@ type RenderContext(inModel:ModelData, inDest:Image) =
     let mutable bgimagevert = int32(0)
     let mutable bgimageidx = int32(0)
     let mutable bgshader : Shader option = None
+    let mutable bgtex : PathTexture option = None
+    
 
-    member this.checkGLError =
+    let checkGLError() =
         let error = GL.GetError()
         let hasError = error = ErrorCode.NoError
         System.Diagnostics.Debug.Assert( hasError )
+
+    let checkSourceImage() =
+        let existing = if bgtex.IsSome then bgtex.Value.path else ""
+        let existingmatches = existing = model.source
+        if not existingmatches then
+            bgtex <- createGlTexFromPath( model.source )
+            checkGLError()
+            
+        
+    let renderSourceImage() = 
+        checkSourceImage()
+        if bgtex.IsSome then
+            GL.UseProgram( bgshader.Value.progHandle )
+            GL.BindBuffer( BufferTarget.ArrayBuffer, bgimagevert )
+            GL.EnableVertexAttribArray( 0 )
+            GL.VertexAttribPointer( 0, 2, VertexAttribPointerType.Float, true, 8, 0)
+            GL.BindBuffer( BufferTarget.ElementArrayBuffer, bgimageidx )
+            (*Note we bind to texture unit 0.  This explains the sampler value below*)
+            GL.ActiveTexture( TextureUnit.Texture0 )
+            GL.BindTexture( TextureTarget.Texture2D, bgtex.Value.handle)
+            checkGLError()
+            (*Texture properties match to the texture unit, not to the texture itself*)
+            GL.TexParameter( TextureTarget.Texture2D
+                                , TextureParameterName.TextureMinFilter
+                                , int(TextureMinFilter.Linear) )
+            GL.TexParameter( TextureTarget.Texture2D
+                                , TextureParameterName.TextureMagFilter
+                                , int(TextureMagFilter.Linear) )
+            GL.TexParameter( TextureTarget.Texture2D
+                                , TextureParameterName.TextureWrapS
+                                , int(TextureWrapMode.ClampToBorder) )
+            GL.TexParameter( TextureTarget.Texture2D
+                                , TextureParameterName.TextureWrapT
+                                , int(TextureWrapMode.ClampToBorder) )
+            checkGLError()
+            let imageLoc = GL.GetUniformLocation( bgshader.Value.progHandle, "image")
+            GL.Uniform1( imageLoc, int(TextureUnit.Texture0 - TextureUnit.Texture0) )
+            checkGLError()
+            GL.Disable( EnableCap.CullFace )
+            GL.Disable( EnableCap.DepthTest )
+            GL.Disable( EnableCap.StencilTest )
+            GL.Enable( EnableCap.Blend )
+            GL.BlendFuncSeparate( BlendingFactorSrc.SrcAlpha, BlendingFactorDest.OneMinusSrcAlpha, BlendingFactorSrc.One, BlendingFactorDest.OneMinusSrcAlpha )
+            GL.DrawElements( BeginMode.Triangles, 6, DrawElementsType.UnsignedInt, 0 )
+            GL.BindBuffer( BufferTarget.ArrayBuffer, 0 )
+            GL.BindBuffer( BufferTarget.ElementArrayBuffer, 0 )
+            GL.DisableVertexAttribArray( 0 )
+            checkGLError()
+            
+            
 
     member this.checkBuffers() = 
         if bgimagevert = 0 then
@@ -350,39 +458,20 @@ type RenderContext(inModel:ModelData, inDest:Image) =
 
             bgshader <- compileShaderProgram( bgimage_vert, bgimage_frag )
 
+        
 
 
     member this.render(width, height) =
         if (width > 0 && height > 0) then 
             GL.Viewport( 0, 0, width, height)
             GL.ClearColor( 1.0f, 1.0f, 1.0f, 1.0f )
-            GL.Clear( ClearBufferMask.ColorBufferBit )
-            this.checkGLError
+            GL.Clear( ClearBufferMask.ColorBufferBit ||| ClearBufferMask.DepthBufferBit )
+            checkGLError()
             this.checkBuffers()
-            GL.UseProgram( bgshader.Value.progHandle )
-            GL.BindBuffer( BufferTarget.ArrayBuffer, bgimagevert )
-            GL.EnableVertexAttribArray( 0 )
-            GL.VertexAttribPointer( 0, 2, VertexAttribPointerType.Float, true, 8, 0)
-        
-            this.checkGLError
+            renderSourceImage()
 
-            GL.BindBuffer( BufferTarget.ElementArrayBuffer, bgimageidx )
 
-            GL.Disable( EnableCap.CullFace )
         
-            GL.Disable( EnableCap.DepthTest )
-        
-            GL.Disable( EnableCap.StencilTest )
-        
-            GL.Disable( EnableCap.Blend )
-        
-            GL.DrawElements( BeginMode.Triangles, 6, DrawElementsType.UnsignedInt, 0 )
-        
-            GL.BindBuffer( BufferTarget.ArrayBuffer, 0 )
-        
-            GL.BindBuffer( BufferTarget.ElementArrayBuffer, 0 )
-        
-            GL.DisableVertexAttribArray( 0 )
         
 
 
@@ -396,7 +485,6 @@ let main argv =
     let results = new Image()
     gobj.renderview.Add( renderer )
     let settings = ModelData.load()
-    bindModelToUI( gobj, settings, renderer)
 
     let rc = RenderContext( settings, results )
     let renderFrame evArgs =
@@ -412,8 +500,10 @@ let main argv =
     gobj.resultview.Add( results )
     gobj.resultview.ShowAll();
     settings.toUI(gobj)
+    bindModelToUI( gobj, settings, renderer)
     
 
     gobj.mainwindow.Destroyed.Add( fun evArgs -> settings.fromUI(gobj); settings.save(); Application.Quit() )
     Application.Run()
+    settings.save()
     0 // return an integer exit code
