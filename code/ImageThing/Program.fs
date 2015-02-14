@@ -604,7 +604,7 @@ let buildMVPFromModel( rotation, scale, translation:Vector2, aspect:float32 ) =
     projection.Row1 <- Vector4( 0.0f, aspect, 0.0f, 0.0f )
 
     let model = Matrix4.Mult( Matrix4.Mult( rotMat, scaleMat ), translationMat )
-    let mvp = Matrix4.Mult(projection, model )
+    let mvp = Matrix4.Mult(model, projection )
     mvp
 
 
@@ -767,7 +767,7 @@ type RenderContext(inModel:ModelData, inDest:Image) =
         
 let buildTargetBitmap( model:ModelData, img : Image, aspect ) = 
     try
-        let mvp = buildMVPFromModel( -1.0f * model.rotation, model.scale, model.translation, aspect )
+        let mvp = buildMVPFromModel(-1.0f *  model.rotation, model.scale, model.translation, aspect )
         let length = model.destsize * model.destsize * 4;
         let destbytes : byte array = Array.zeroCreate length
         let (bytes,srcbits) = loadBitmapBytes( model.source )
