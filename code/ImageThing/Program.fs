@@ -777,6 +777,7 @@ let buildTargetBitmap( model:ModelData, img : Image, aspect ) =
 
 [<EntryPoint>]
 let main argv = 
+    Toolkit.Init() |> ignore
     Application.Init()
     let gxml = new Glade.XML( null, "gui.glade", "mainwindow", null )
     let gobj = new GladeObj()
@@ -795,7 +796,6 @@ let main argv =
         buildTargetBitmap(settings, results, aspect)
 
     
-    let toolkit = Toolkit.Init()
     renderer.RenderFrame.Add( renderFrame )
     gobj.renderview.ShowAll();
     gobj.resultview.Add( results )
