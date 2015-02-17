@@ -506,36 +506,16 @@ let compileShaderProgram( vcode, fcode ) : Shader option=
                 Console.WriteLine( fcode )
                 None
 
-
-                
-let toNativef32 (data:float32[] ) =
-    let datalen = data.Length
-    let datasize = nativeint(datalen * 4);
-    let retval = Marshal.AllocHGlobal( datasize )
-    Marshal.Copy(data, 0, retval, data.Length )
-    (retval,datasize)
-    
-let toNativei32 (data:int32[] ) =
-    let datalen = data.Length
-    let datasize = nativeint(datalen * 4);
-    let retval = Marshal.AllocHGlobal( datasize )
-    Marshal.Copy(data, 0, retval, data.Length )
-    (retval,datasize)
-
-let createAndUploadDataf32( data, target, usage ) =
+let createAndUploadDataf32( data : float32 array, target, usage ) =
     let retval = GL.GenBuffer()
-    let (buffer,nativesize) = toNativef32( data )
     GL.BindBuffer( target, retval )
-    GL.BufferData( target, nativesize, buffer, usage)
-    Marshal.Release( buffer ) |> ignore
+    GL.BufferData( target, nativeint(data.Length*4), data, usage)
     retval
     
-let createAndUploadDatai32( data, target, usage ) =
+let createAndUploadDatai32( data : int array, target, usage ) =
     let retval = GL.GenBuffer()
-    let (buffer,nativesize) = toNativei32( data )
     GL.BindBuffer( target, retval )
-    GL.BufferData( target, nativesize, buffer, usage)
-    Marshal.Release( buffer ) |> ignore
+    GL.BufferData( target, nativeint(data.Length*4), data, usage)
     retval
 
 type PathTexture =
