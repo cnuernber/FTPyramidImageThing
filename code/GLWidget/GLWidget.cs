@@ -80,8 +80,8 @@ namespace Gtk
 		/// <summary>Constructs a new GLWidget</summary>
 		public GLWidget(GraphicsMode graphicsMode, int glVersionMajor, int glVersionMinor, GraphicsContextFlags graphicsContextFlags)
 		{
-			this.DoubleBuffered = false;
-			
+			AppPaintable = true; 
+			DoubleBuffered = false;
 			SingleBuffer = graphicsMode.Buffers == 1;
 			ColorBPP = graphicsMode.ColorFormat.BitsPerPixel;
 			AccumulatorBPP = graphicsMode.AccumulatorFormat.BitsPerPixel;
@@ -235,11 +235,18 @@ namespace Gtk
 				graphicsContext.MakeCurrent(windowInfo);
 			}
 
-			bool result = base.OnExposeEvent(eventExpose);
 			OnRenderFrame();
-			eventExpose.Window.Display.Sync(); // Add Sync call to fix resize rendering problem (Jay L. T. Cornwall) - How does this affect VSync?
 			graphicsContext.SwapBuffers();
-			return result;
+			//base.OnExposeEvent(eventExpose);
+			return true;
+		}
+
+		public void MakeCurrent() {
+			graphicsContext.MakeCurrent (windowInfo);
+		}
+
+		public void SwapBuffers() {
+			graphicsContext.SwapBuffers ();
 		}
 
 		// Called on Resize

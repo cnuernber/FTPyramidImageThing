@@ -14,11 +14,11 @@
         <property name="visible">True</property>
         <property name="can_focus">False</property>
         <child>
-          <widget class="GtkHPaned" id="hpaned1">
+          <widget class="GtkHPaned" id="mainpane">
             <property name="visible">True</property>
             <property name="can_focus">True</property>
             <child>
-              <widget class="GtkVBox" id="vbox1">
+              <widget class="GtkVBox" id="leftbox">
                 <property name="visible">True</property>
                 <property name="can_focus">False</property>
                 <child>
@@ -160,6 +160,7 @@
                             <property name="visible">True</property>
                             <property name="can_focus">True</property>
                             <property name="receives_default">True</property>
+                            <property name="use_action_appearance">False</property>
                           </widget>
                           <packing>
                             <property name="expand">False</property>
@@ -201,6 +202,7 @@
                             <property name="visible">True</property>
                             <property name="can_focus">True</property>
                             <property name="receives_default">True</property>
+                            <property name="use_action_appearance">False</property>
                           </widget>
                           <packing>
                             <property name="expand">False</property>
@@ -252,18 +254,7 @@
                   </packing>
                 </child>
                 <child>
-                  <widget class="GtkViewport" id="renderview">
-                    <property name="visible">True</property>
-                    <property name="can_focus">False</property>
-                    <child>
-                      <placeholder/>
-                    </child>
-                  </widget>
-                  <packing>
-                    <property name="expand">True</property>
-                    <property name="fill">True</property>
-                    <property name="position">1</property>
-                  </packing>
+                  <placeholder/>
                 </child>
               </widget>
               <packing>
@@ -272,17 +263,7 @@
               </packing>
             </child>
             <child>
-              <widget class="GtkViewport" id="resultview">
-                <property name="visible">True</property>
-                <property name="can_focus">False</property>
-                <child>
-                  <placeholder/>
-                </child>
-              </widget>
-              <packing>
-                <property name="resize">True</property>
-                <property name="shrink">True</property>
-              </packing>
+              <placeholder/>
             </child>
           </widget>
         </child>

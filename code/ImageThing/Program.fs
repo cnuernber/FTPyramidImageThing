@@ -183,8 +183,8 @@ type public GladeObj () =
     [<Widget>] [<DefaultValue>] val mutable source : Entry
     [<Widget>] [<DefaultValue>] val mutable destination : Entry
     [<Widget>] [<DefaultValue>] val mutable destsize : Entry
-    [<Widget>] [<DefaultValue>] val mutable renderview : Viewport
-    [<Widget>] [<DefaultValue>] val mutable resultview : Viewport
+    [<Widget>] [<DefaultValue>] val mutable mainpane : HPaned
+    [<Widget>] [<DefaultValue>] val mutable leftbox : VBox
     [<Widget>] [<DefaultValue>] val mutable destBrowse : Button
     [<Widget>] [<DefaultValue>] val mutable srcBrowse : Button
 
@@ -307,7 +307,7 @@ let findFile( canRead, uiParent, existing:string ) =
 let bindModelToUI( ui:GladeObj, model:ModelData, render:GLWidget ) = 
     let genericHandler evArgs =
         model.fromUI(ui)
-        render.QueueDraw()
+        render.QueueResize()
     ui.rotation.Changed.Add( genericHandler )
     ui.scale.Changed.Add( genericHandler )
     ui.translation.Changed.Add( genericHandler )
@@ -783,8 +783,9 @@ let main argv =
     let gobj = new GladeObj()
     gxml.Autoconnect( gobj )
     let renderer = new GLWidget(OpenTK.Graphics.GraphicsMode.Default, 3, 0, OpenTK.Graphics.GraphicsContextFlags.Default )
+    renderer.SingleBuffer <- false
     let results = new Image()
-    gobj.renderview.Add( renderer )
+    gobj.leftbox.Add( renderer )
     let settings = ModelData.load()
 
     let rc = RenderContext( settings, results )
@@ -792,14 +793,19 @@ let main argv =
         let alloc = renderer.Allocation 
         let width = alloc.Width
         let height = alloc.Height
-        let aspect =  rc.render(width, height)
-        buildTargetBitmap(settings, results, aspect)
+        rc.render(width, height) |> ignore
+        //buildTargetBitmap(settings, results, aspect)
 
+    let idleHandler () = 
+        renderer.MakeCurrent()
+        renderFrame( null )
+        renderer.SwapBuffers()
+        true
     
     renderer.RenderFrame.Add( renderFrame )
-    gobj.renderview.ShowAll();
-    gobj.resultview.Add( results )
-    gobj.resultview.ShowAll();
+    renderer.Show();
+    gobj.mainpane.Add( results )
+    gobj.mainpane.ShowAll();
     settings.toUI(gobj)
     bindModelToUI( gobj, settings, renderer)
     
